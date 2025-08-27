@@ -2,7 +2,7 @@
 import axios from "axios";
 
 export const http = axios.create({
-  baseURL: import.meta.env.VITE_API_BASE || "http://localhost:7000/api",
+  baseURL: import.meta.env.VITE_API_BASE,
   withCredentials: false,
 });
 
@@ -20,7 +20,7 @@ http.interceptors.response.use(
     if (err?.response?.status === 401) {
       localStorage.removeItem("token");
       localStorage.removeItem("user");
-      // optional redirect
+      // optional: redirect
       // window.location.assign("/login");
     }
     return Promise.reject(err);
