@@ -36,16 +36,14 @@ app.use(limiter);
 
 //  Middleware
 app.use(express.json());
-const allowedOrigins = [
-  "http://localhost:5173", // local dev
-  "https://marwah-travels-server.vercel.app", // ✅ production frontend
-  "https://marwah-travels-server-fvbqrdecy-marwah.vercel.app", // optional: preview deployments
-];
-
 app.use(
   cors({
     origin: function (origin, callback) {
-      if (!origin || allowedOrigins.includes(origin)) {
+      if (!origin) return callback(null, true);
+      if (
+        origin.includes("vercel.app") || // ✅ allow any Vercel deployment
+        origin === "http://localhost:5173"
+      ) {
         callback(null, true);
       } else {
         callback(new Error("Not allowed by CORS"));
@@ -54,6 +52,7 @@ app.use(
     credentials: true,
   })
 );
+
 app.use(morgan(process.env.NODE_ENV === "production" ? "combined" : "dev"));
 
 // Create default admin if none exists
