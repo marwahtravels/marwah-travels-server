@@ -45,33 +45,33 @@ app.use(
 app.use(morgan(process.env.NODE_ENV === "production" ? "combined" : "dev"));
 
 // Create default admin if none exists
-// const createDefaultAdmin = async () => {
-//     try {
-//     const adminExists = await User.findOne({ role: "admin" });
+const createDefaultAdmin = async () => {
+    try {
+    const adminExists = await User.findOne({ role: "admin" });
 
-//     if (!adminExists) {
-//         const hashedPassword = await bcrypt.hash("admin123", 10);
+    if (!adminExists) {
+        const hashedPassword = await bcrypt.hash("admin123", 10);
   
-//         await User.create({
-//             name: "Admin User",
-//         email: "admin@example.com",
-//         passwordHash: hashedPassword,
-//         role: "admin",
-//       });
+        await User.create({
+            name: "Admin User",
+        email: "admin@example.com",
+        passwordHash: hashedPassword,
+        role: "admin",
+      });
 
-//       console.log(
-//         "Default admin created → email: admin@example.com | password: admin123"
-//       );
-//     } else {
-//       console.log("ℹAdmin already exists, skipping...");
-//     }
-//   } catch (error) {
-//       console.error("Error creating default admin:", error.message);
-//   }
-// };
+      console.log(
+        "Default admin created → email: admin@example.com | password: admin123"
+      );
+    } else {
+      console.log("ℹAdmin already exists, skipping...");
+    }
+  } catch (error) {
+      console.error("Error creating default admin:", error.message);
+  }
+};
 
 // Call after DB connection
-// await createDefaultAdmin();
+await createDefaultAdmin();
 
 // API Routes
 app.use("/api/auth", authRoutes);
