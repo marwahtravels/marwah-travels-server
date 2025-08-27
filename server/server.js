@@ -36,9 +36,20 @@ app.use(limiter);
 
 //  Middleware
 app.use(express.json());
+const allowedOrigins = [
+  "http://localhost:5173", // local dev
+  "https://marwah-travels-server-fvbqrdecy-marwah.vercel.app", // vercel prod
+];
+
 app.use(
   cors({
-    origin: process.env.CLIENT_ORIGIN || "http://localhost:5173",
+    origin: function (origin, callback) {
+      if (!origin || allowedOrigins.includes(origin)) {
+        callback(null, true);
+      } else {
+        callback(new Error("Not allowed by CORS"));
+      }
+    },
     credentials: true,
   })
 );
