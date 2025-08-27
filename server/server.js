@@ -22,7 +22,6 @@ dotenv.config();
 connectDB();
 
 const app = express();
-app.set("trust proxy", 1);
 
 
 // Security & Rate Limiting
@@ -82,6 +81,10 @@ app.use('/api/agent', agentRoutes);
 app.use("/api/analytics", analyticsRoutes);
 // app.use("/api/pdf", pdfRoutes);
 // export default app;
+// server.js (routes mount ho jane ke BAAD ye lines add karein)
+
+
+
 
 // Health Check Route
 app.get("/", (req, res) => {

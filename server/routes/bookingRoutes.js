@@ -24,3 +24,4 @@ router.route("/:id")
 
 
 export default router;
+// server.js (routes mount ho jane ke BAAD ye lines add karein)

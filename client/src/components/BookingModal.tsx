@@ -1,587 +1,308 @@
-import React, { useState } from 'react';
-import { X, User, Users, Baby, Mail, Phone, Calendar, MapPin, CreditCard, Plane, Building, Car, DollarSign } from 'lucide-react';
+import React, { useMemo, useState } from 'react';
+import { X, User, CreditCard, Plane, Building, MapPin, Car, DollarSign } from 'lucide-react';
+import { useAuth } from '../context/AuthContext';
+import { useData } from '../context/DataContext';
+import { http } from '../lib/http';
+
+export type StepId = 'contact' | 'credit' | 'flights' | 'hotels' | 'visa' | 'transport' | 'costing';
+
+export interface BookingFormData {
+  // Contact
+  name: string;
+  passengers: string;
+  adults: string;
+  children: string;
+  email: string;
+  contactNumber: string;
+  agent: string;
+
+  // Credit
+  cardNumber: string;
+  expiryDate: string;
+  cvv: string;
+  cardholderName: string;
+
+  // Flights
+  departureCity: string;
+  arrivalCity: string;
+  departureDate: string;
+  returnDate: string;
+  flightClass: 'economy' | 'business' | 'first';
+
+  // Hotels
+  hotelName: string;
+  roomType: string;
+  checkIn: string;
+  checkOut: string;
+
+  // Visa
+  visaType: 'umrah' | 'hajj' | 'tourist';
+  passportNumber: string;
+  nationality: string;
+
+  // Transport
+  transportType: 'bus' | 'car' | 'van' | 'taxi';
+  pickupLocation: string;
+
+  // Costing
+  packagePrice: string;
+  additionalServices: string;
+  totalAmount: string;
+  paymentMethod: 'credit_card' | 'bank_transfer' | 'cash' | 'installments';
+
+  // Backend required additions
+  package?: string; // REQUIRED by backend
+  date?: string;    // REQUIRED by backend (booking date)
+}
+
+export const steps: { id: StepId; title: string; icon: React.ComponentType<any> }[] = [
+  { id: 'contact',   title: 'Contact Info', icon: User },
+  { id: 'credit',    title: 'Credit Card',  icon: CreditCard },
+  { id: 'flights',   title: 'Flights',      icon: Plane },
+  { id: 'hotels',    title: 'Hotels',       icon: Building },
+  { id: 'visa',      title: 'Visa(s)',      icon: MapPin },
+  { id: 'transport', title: 'Transportation', icon: Car },
+  { id: 'costing',   title: 'Costing',      icon: DollarSign },
+];
+
+function toNumber(v: string) {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : 0;
+}
+function isoOrNull(v?: string | null) {
+  if (!v) return null;
+  const d = new Date(v);
+  return Number.isNaN(d.valueOf()) ? null : d.toISOString();
+}
+
+/** 🔧 Exported: validate current step (pure) */
+export function validateStepData(formData: BookingFormData, id: StepId): Record<string, string> {
+  const e: Record<string, string> = {};
+  if (id === 'contact') {
+    if (!formData.name?.trim()) e.name = 'Name is required';
+    if (!formData.email?.trim()) e.email = 'Email is required';
+    if (!formData.contactNumber?.trim()) e.contactNumber = 'Contact number is required';
+    if (!formData.passengers?.trim()) e.passengers = 'Number of passengers is required';
+  }
+  if (id === 'credit') {
+    if (!formData.cardholderName?.trim()) e.cardholderName = 'Cardholder name is required';
+  }
+  if (id === 'flights') {
+    if (!formData.departureCity?.trim()) e.departureCity = 'Departure city is required';
+    if (!formData.arrivalCity?.trim()) e.arrivalCity = 'Arrival city is required';
+    if (!formData.departureDate) e.departureDate = 'Departure date is required';
+    if (!formData.returnDate) e.returnDate = 'Return date is required';
+    // Booking Date (backend "date")
+    if (!formData.date) e.date = 'Booking date is required';
+  }
+  if (id === 'costing') {
+    if (!formData.totalAmount?.trim()) e.totalAmount = 'Total amount is required';
+    if (!formData.package?.trim()) e.package = 'Package is required';
+  }
+  return e;
+}
+
+/** 🔧 Exported: build API payload (pure) — maps to backend-required keys */
+export function buildBookingPayload(formData: BookingFormData, user: any) {
+  const agentId =
+    user?.agentId ?? user?.id ?? user?._id ?? (formData.agent || undefined);
+
+  // Required by backend schema:
+  const customerName  = formData.name;
+  const customerEmail = formData.email;
+  const pkg           = formData.package || '';
+  const bookingDateIso =
+    isoOrNull(formData.date) ||
+    isoOrNull(formData.departureDate) ||
+    new Date().toISOString();
+
+  return {
+    // ---- REQUIRED FIELDS (names the backend expects)
+    customerName,
+    customerEmail,
+    package: pkg,
+    date: bookingDateIso,
+
+    // ---- Additional fields your backend likely accepts
+    contactNumber: formData.contactNumber,
+    passengers: toNumber(formData.passengers),
+    adults: toNumber(formData.adults),
+    children: toNumber(formData.children),
+    agentId,
+
+    flight: {
+      departureCity: formData.departureCity || null,
+      arrivalCity:   formData.arrivalCity || null,
+      departureDate: isoOrNull(formData.departureDate),
+      returnDate:    isoOrNull(formData.returnDate),
+      class:         formData.flightClass || 'economy',
+    },
+
+    hotel: {
+      name:     formData.hotelName || null,
+      roomType: formData.roomType || null,
+      checkIn:  isoOrNull(formData.checkIn),
+      checkOut: isoOrNull(formData.checkOut),
+    },
+
+    visa: {
+      type:           formData.visaType || 'umrah',
+      passportNumber: formData.passportNumber || null,
+      nationality:    formData.nationality || null,
+    },
+
+    transport: {
+      type:           formData.transportType || 'bus',
+      pickupLocation: formData.pickupLocation || null,
+    },
+
+    pricing: {
+      packagePrice:       toNumber(formData.packagePrice),
+      totalAmount:        toNumber(formData.totalAmount),
+      additionalServices: formData.additionalServices || '',
+      currency:           'USD',
+    },
+
+    payment: {
+      method:   formData.paymentMethod,
+      cardLast4: formData.cardNumber ? formData.cardNumber.replace(/\s+/g, '').slice(-4) : undefined,
+    },
+
+    // Often convenient for backend:
+    amount: toNumber(formData.totalAmount),
+    status: 'pending',
+    approvalStatus: 'pending',
+  };
+}
 
 interface BookingModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onSubmit: (bookingData: any) => void;
+  onSubmit?: (created: any) => void;
 }
 
 const BookingModal: React.FC<BookingModalProps> = ({ isOpen, onClose, onSubmit }) => {
+  const { user } = useAuth();
+  const { refresh } = useData();
+
   const [currentStep, setCurrentStep] = useState(0);
   const [errors, setErrors] = useState<Record<string, string>>({});
-  const [formData, setFormData] = useState({
-    // Contact Info
-    name: '',
-    passengers: '',
-    adults: '',
-    children: '',
-    email: '',
-    contactNumber: '',
-    agent: '',
-    
-    // Credit Card
-    cardNumber: '',
-    expiryDate: '',
-    cvv: '',
-    cardholderName: '',
-    
-    // Flights
-    departureCity: '',
-    arrivalCity: '',
-    departureDate: '',
-    returnDate: '',
-    flightClass: 'economy',
-    
-    // Hotels
-    hotelName: '',
-    roomType: '',
-    checkIn: '',
-    checkOut: '',
-    
-    // Visa
-    visaType: 'umrah',
-    passportNumber: '',
-    nationality: '',
-    
-    // Transportation
-    transportType: 'bus',
-    pickupLocation: '',
-    
-    // Costing
-    packagePrice: '',
-    additionalServices: '',
-    totalAmount: '',
-    paymentMethod: 'credit_card'
+  const [serverError, setServerError] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+
+  const [formData, setFormData] = useState<BookingFormData>({
+    name: '', passengers: '', adults: '', children: '', email: '', contactNumber: '', agent: '',
+    cardNumber: '', expiryDate: '', cvv: '', cardholderName: '',
+    departureCity: '', arrivalCity: '', departureDate: '', returnDate: '', flightClass: 'economy',
+    hotelName: '', roomType: '', checkIn: '', checkOut: '',
+    visaType: 'umrah', passportNumber: '', nationality: '',
+    transportType: 'bus', pickupLocation: '',
+    packagePrice: '', additionalServices: '', totalAmount: '', paymentMethod: 'credit_card',
+    // NEW required fields for backend:
+    package: '',
+    date: '',
   });
 
-  const steps = [
-    { id: 'contact', title: 'Contact Info', icon: User },
-    { id: 'credit', title: 'Credit Card', icon: CreditCard },
-    { id: 'flights', title: 'Flights', icon: Plane },
-    { id: 'hotels', title: 'Hotels', icon: Building },
-    { id: 'visa', title: 'Visa(s)', icon: MapPin },
-    { id: 'transport', title: 'Transportation', icon: Car },
-    { id: 'costing', title: 'Costing', icon: DollarSign }
-  ];
+  const step = steps[currentStep];
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
     const { name, value } = e.target;
-    setFormData({
-      ...formData,
-      [name]: value
-    });
-    
-    // Clear error when user starts typing
-    if (errors[name]) {
-      setErrors(prev => ({
-        ...prev,
-        [name]: ''
-      }));
-    }
+    setFormData((s) => ({ ...s, [name]: value }));
+    if (errors[name]) setErrors((p) => ({ ...p, [name]: '' }));
+    setServerError('');
   };
 
-  const validateStep = (stepIndex: number): boolean => {
-    const newErrors: Record<string, string> = {};
-    const step = steps[stepIndex];
-    
-    switch (step.id) {
-      case 'contact':
-        if (!formData.name.trim()) newErrors.name = 'Name is required';
-        if (!formData.email.trim()) newErrors.email = 'Email is required';
-        if (!formData.contactNumber.trim()) newErrors.contactNumber = 'Contact number is required';
-        if (!formData.passengers.trim()) newErrors.passengers = 'Number of passengers is required';
-        break;
-      case 'credit':
-        if (!formData.cardNumber.trim()) newErrors.cardNumber = 'Card number is required';
-        if (!formData.expiryDate.trim()) newErrors.expiryDate = 'Expiry date is required';
-        if (!formData.cvv.trim()) newErrors.cvv = 'CVV is required';
-        if (!formData.cardholderName.trim()) newErrors.cardholderName = 'Cardholder name is required';
-        break;
-      case 'flights':
-        if (!formData.departureCity.trim()) newErrors.departureCity = 'Departure city is required';
-        if (!formData.arrivalCity.trim()) newErrors.arrivalCity = 'Arrival city is required';
-        if (!formData.departureDate) newErrors.departureDate = 'Departure date is required';
-        if (!formData.returnDate) newErrors.returnDate = 'Return date is required';
-        break;
-      case 'costing':
-        if (!formData.totalAmount.trim()) newErrors.totalAmount = 'Total amount is required';
-        break;
-    }
-    
-    setErrors(newErrors);
-    return Object.keys(newErrors).length === 0;
+  const validateStep = (id: StepId) => {
+    const e = validateStepData(formData, id);
+    setErrors(e);
+    return Object.keys(e).length === 0;
   };
+
   const handleNext = () => {
-    if (validateStep(currentStep) && currentStep < steps.length - 1) {
-      setCurrentStep(currentStep + 1);
+    if (validateStep(step.id) && currentStep < steps.length - 1) {
+      setCurrentStep((s) => s + 1);
     }
   };
+  const handlePrevious = () => setCurrentStep((s) => Math.max(0, s - 1));
 
-  const handlePrevious = () => {
-    if (currentStep > 0) {
-      setCurrentStep(currentStep - 1);
-    }
+  const payload = useMemo(() => buildBookingPayload(formData, user), [formData, user]);
+
+  const resetForm = () => {
+    setFormData({
+      name: '', passengers: '', adults: '', children: '', email: '', contactNumber: '', agent: '',
+      cardNumber: '', expiryDate: '', cvv: '', cardholderName: '',
+      departureCity: '', arrivalCity: '', departureDate: '', returnDate: '', flightClass: 'economy',
+      hotelName: '', roomType: '', checkIn: '', checkOut: '',
+      visaType: 'umrah', passportNumber: '', nationality: '',
+      transportType: 'bus', pickupLocation: '',
+      packagePrice: '', additionalServices: '', totalAmount: '', paymentMethod: 'credit_card',
+      package: '', date: '',
+    });
+    setCurrentStep(0);
+    setErrors({});
+    setServerError('');
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (validateStep(currentStep)) {
-      onSubmit(formData);
+  const fillTestData = () => {
+    const today = new Date();
+    const nextWeek = new Date(); nextWeek.setDate(today.getDate() + 7);
+    setFormData((s) => ({
+      ...s,
+      name: 'John Doe',
+      email: 'john@example.com',
+      contactNumber: '+1-555-1234',
+      passengers: '3',
+      adults: '2',
+      children: '1',
+      agent: '',
+      cardNumber: '4111 1111 1111 1111',
+      expiryDate: '12/28',
+      cvv: '123',
+      cardholderName: 'JOHN DOE',
+      departureCity: 'Karachi',
+      arrivalCity: 'Jeddah',
+      departureDate: today.toISOString().slice(0, 10),
+      returnDate: nextWeek.toISOString().slice(0, 10),
+      flightClass: 'economy',
+      hotelName: 'Hilton',
+      roomType: 'double',
+      checkIn: today.toISOString().slice(0, 10),
+      checkOut: nextWeek.toISOString().slice(0, 10),
+      visaType: 'umrah',
+      passportNumber: 'AB1234567',
+      nationality: 'PK',
+      transportType: 'bus',
+      pickupLocation: 'Jeddah Airport',
+      packagePrice: '1200',
+      additionalServices: 'Zamzam water, Ziyarah',
+      totalAmount: '1500',
+      paymentMethod: 'credit_card',
+      package: '7N Umrah Standard',
+      date: today.toISOString().slice(0, 10), // Booking date
+    }));
+  };
+
+  const handleSubmit = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    if (!validateStep(step.id)) return;
+
+    setSubmitting(true);
+    setServerError('');
+    try {
+      const res = await http.post('/api/bookings', payload);
+      onSubmit?.(res.data);
+      await refresh().catch(() => {});
+      resetForm();
       onClose();
-      // Reset form
-      setFormData({
-        name: '', passengers: '', adults: '', children: '', email: '', contactNumber: '', agent: '',
-        cardNumber: '', expiryDate: '', cvv: '', cardholderName: '',
-        departureCity: '', arrivalCity: '', departureDate: '', returnDate: '', flightClass: 'economy',
-        hotelName: '', roomType: '', checkIn: '', checkOut: '',
-        visaType: 'umrah', passportNumber: '', nationality: '',
-        transportType: 'bus', pickupLocation: '',
-        packagePrice: '', additionalServices: '', totalAmount: '', paymentMethod: 'credit_card'
-      });
-      setCurrentStep(0);
-      setErrors({});
-    }
-  };
-
-  const renderStepContent = () => {
-    switch (steps[currentStep].id) {
-      case 'contact':
-        return (
-          <div className="space-y-4">
-            <h3 className="text-lg font-semibold text-gray-900 mb-4">Contact Info</h3>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Enter Name</label>
-                <input
-                  type="text"
-                  name="name"
-                  value={formData.name}
-                  onChange={handleInputChange}
-                  className={`w-full px-3 py-2 border-b focus:outline-none transition-colors ${
-                    errors.name ? 'border-red-500 focus:border-red-500' : 'border-gray-300 focus:border-blue-500'
-                  }`}
-                  placeholder="Enter Name"
-                />
-                {errors.name && <p className="text-red-500 text-xs mt-1">{errors.name}</p>}
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Enter Number of Passengers</label>
-                <input
-                  type="number"
-                  name="passengers"
-                  value={formData.passengers}
-                  onChange={handleInputChange}
-                  className={`w-full px-3 py-2 border-b focus:outline-none transition-colors ${
-                    errors.passengers ? 'border-red-500 focus:border-red-500' : 'border-gray-300 focus:border-blue-500'
-                  }`}
-                  placeholder="Enter Number of Passengers"
-                />
-                {errors.passengers && <p className="text-red-500 text-xs mt-1">{errors.passengers}</p>}
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">How many Adults?</label>
-                <input
-                  type="number"
-                  name="adults"
-                  value={formData.adults}
-                  onChange={handleInputChange}
-                  className="w-full px-3 py-2 border-b border-gray-300 focus:border-blue-500 focus:outline-none transition-colors"
-                  placeholder="How many Adults?"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">How many Child?</label>
-                <input
-                  type="number"
-                  name="children"
-                  value={formData.children}
-                  onChange={handleInputChange}
-                  className="w-full px-3 py-2 border-b border-gray-300 focus:border-blue-500 focus:outline-none transition-colors"
-                  placeholder="How many Child?"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Enter Email</label>
-                <input
-                  type="email"
-                  name="email"
-                  value={formData.email}
-                  onChange={handleInputChange}
-                  className={`w-full px-3 py-2 border-b focus:outline-none transition-colors ${
-                    errors.email ? 'border-red-500 focus:border-red-500' : 'border-gray-300 focus:border-blue-500'
-                  }`}
-                  placeholder="Enter Email"
-                />
-                {errors.email && <p className="text-red-500 text-xs mt-1">{errors.email}</p>}
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Enter Contact Number</label>
-                <input
-                  type="tel"
-                  name="contactNumber"
-                  value={formData.contactNumber}
-                  onChange={handleInputChange}
-                  className={`w-full px-3 py-2 border-b focus:outline-none transition-colors ${
-                    errors.contactNumber ? 'border-red-500 focus:border-red-500' : 'border-gray-300 focus:border-blue-500'
-                  }`}
-                  placeholder="Enter Contact Number"
-                />
-                {errors.contactNumber && <p className="text-red-500 text-xs mt-1">{errors.contactNumber}</p>}
-              </div>
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">Select Agent:</label>
-              <select
-                name="agent"
-                value={formData.agent}
-                onChange={handleInputChange}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-              >
-                <option value="">Select Agent</option>
-                <option value="ali">Ali Rahman</option>
-                <option value="sara">Sara Khan</option>
-                <option value="ahmed">Ahmed Malik</option>
-              </select>
-            </div>
-          </div>
-        );
-
-      case 'credit':
-        return (
-          <div className="space-y-4">
-            <h3 className="text-lg font-semibold text-gray-900 mb-4">Credit Card Information</h3>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div className="sm:col-span-2">
-                <label className="block text-sm font-medium text-gray-700 mb-2">Card Number</label>
-                <input
-                  type="text"
-                  name="cardNumber"
-                  value={formData.cardNumber}
-                  onChange={handleInputChange}
-                  className={`w-full px-3 py-2 border-b focus:outline-none transition-colors ${
-                    errors.cardNumber ? 'border-red-500 focus:border-red-500' : 'border-gray-300 focus:border-blue-500'
-                  }`}
-                  placeholder="1234 5678 9012 3456"
-                />
-                {errors.cardNumber && <p className="text-red-500 text-xs mt-1">{errors.cardNumber}</p>}
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Expiry Date</label>
-                <input
-                  type="text"
-                  name="expiryDate"
-                  value={formData.expiryDate}
-                  onChange={handleInputChange}
-                  className={`w-full px-3 py-2 border-b focus:outline-none transition-colors ${
-                    errors.expiryDate ? 'border-red-500 focus:border-red-500' : 'border-gray-300 focus:border-blue-500'
-                  }`}
-                  placeholder="MM/YY"
-                />
-                {errors.expiryDate && <p className="text-red-500 text-xs mt-1">{errors.expiryDate}</p>}
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">CVV</label>
-                <input
-                  type="text"
-                  name="cvv"
-                  value={formData.cvv}
-                  onChange={handleInputChange}
-                  className={`w-full px-3 py-2 border-b focus:outline-none transition-colors ${
-                    errors.cvv ? 'border-red-500 focus:border-red-500' : 'border-gray-300 focus:border-blue-500'
-                  }`}
-                  placeholder="123"
-                />
-                {errors.cvv && <p className="text-red-500 text-xs mt-1">{errors.cvv}</p>}
-              </div>
-              <div className="sm:col-span-2">
-                <label className="block text-sm font-medium text-gray-700 mb-2">Cardholder Name</label>
-                <input
-                  type="text"
-                  name="cardholderName"
-                  value={formData.cardholderName}
-                  onChange={handleInputChange}
-                  className={`w-full px-3 py-2 border-b focus:outline-none transition-colors ${
-                    errors.cardholderName ? 'border-red-500 focus:border-red-500' : 'border-gray-300 focus:border-blue-500'
-                  }`}
-                  placeholder="John Doe"
-                />
-                {errors.cardholderName && <p className="text-red-500 text-xs mt-1">{errors.cardholderName}</p>}
-              </div>
-            </div>
-          </div>
-        );
-
-      case 'flights':
-        return (
-          <div className="space-y-4">
-            <h3 className="text-lg font-semibold text-gray-900 mb-4">Flight Information</h3>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Departure City</label>
-                <input
-                  type="text"
-                  name="departureCity"
-                  value={formData.departureCity}
-                  onChange={handleInputChange}
-                  className={`w-full px-3 py-2 border-b focus:outline-none transition-colors ${
-                    errors.departureCity ? 'border-red-500 focus:border-red-500' : 'border-gray-300 focus:border-blue-500'
-                  }`}
-                  placeholder="Departure City"
-                />
-                {errors.departureCity && <p className="text-red-500 text-xs mt-1">{errors.departureCity}</p>}
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Arrival City</label>
-                <input
-                  type="text"
-                  name="arrivalCity"
-                  value={formData.arrivalCity}
-                  onChange={handleInputChange}
-                  className={`w-full px-3 py-2 border-b focus:outline-none transition-colors ${
-                    errors.arrivalCity ? 'border-red-500 focus:border-red-500' : 'border-gray-300 focus:border-blue-500'
-                  }`}
-                  placeholder="Arrival City"
-                />
-                {errors.arrivalCity && <p className="text-red-500 text-xs mt-1">{errors.arrivalCity}</p>}
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Departure Date</label>
-                <input
-                  type="date"
-                  name="departureDate"
-                  value={formData.departureDate}
-                  onChange={handleInputChange}
-                  className={`w-full px-3 py-2 border-b focus:outline-none transition-colors ${
-                    errors.departureDate ? 'border-red-500 focus:border-red-500' : 'border-gray-300 focus:border-blue-500'
-                  }`}
-                />
-                {errors.departureDate && <p className="text-red-500 text-xs mt-1">{errors.departureDate}</p>}
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Return Date</label>
-                <input
-                  type="date"
-                  name="returnDate"
-                  value={formData.returnDate}
-                  onChange={handleInputChange}
-                  className={`w-full px-3 py-2 border-b focus:outline-none transition-colors ${
-                    errors.returnDate ? 'border-red-500 focus:border-red-500' : 'border-gray-300 focus:border-blue-500'
-                  }`}
-                />
-                {errors.returnDate && <p className="text-red-500 text-xs mt-1">{errors.returnDate}</p>}
-              </div>
-              <div className="sm:col-span-2">
-                <label className="block text-sm font-medium text-gray-700 mb-2">Flight Class</label>
-                <select
-                  name="flightClass"
-                  value={formData.flightClass}
-                  onChange={handleInputChange}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                >
-                  <option value="economy">Economy</option>
-                  <option value="business">Business</option>
-                  <option value="first">First Class</option>
-                </select>
-              </div>
-            </div>
-          </div>
-        );
-
-      case 'hotels':
-        return (
-          <div className="space-y-4">
-            <h3 className="text-lg font-semibold text-gray-900 mb-4">Hotel Information</h3>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Hotel Name</label>
-                <input
-                  type="text"
-                  name="hotelName"
-                  value={formData.hotelName}
-                  onChange={handleInputChange}
-                  className="w-full px-3 py-2 border-b border-gray-300 focus:border-blue-500 focus:outline-none transition-colors"
-                  placeholder="Hotel Name"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Room Type</label>
-                <select
-                  name="roomType"
-                  value={formData.roomType}
-                  onChange={handleInputChange}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                >
-                  <option value="">Select Room Type</option>
-                  <option value="single">Single Room</option>
-                  <option value="double">Double Room</option>
-                  <option value="triple">Triple Room</option>
-                  <option value="quad">Quad Room</option>
-                </select>
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Check-in Date</label>
-                <input
-                  type="date"
-                  name="checkIn"
-                  value={formData.checkIn}
-                  onChange={handleInputChange}
-                  className="w-full px-3 py-2 border-b border-gray-300 focus:border-blue-500 focus:outline-none transition-colors"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Check-out Date</label>
-                <input
-                  type="date"
-                  name="checkOut"
-                  value={formData.checkOut}
-                  onChange={handleInputChange}
-                  className="w-full px-3 py-2 border-b border-gray-300 focus:border-blue-500 focus:outline-none transition-colors"
-                />
-              </div>
-            </div>
-          </div>
-        );
-
-      case 'visa':
-        return (
-          <div className="space-y-4">
-            <h3 className="text-lg font-semibold text-gray-900 mb-4">Visa Information</h3>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Visa Type</label>
-                <select
-                  name="visaType"
-                  value={formData.visaType}
-                  onChange={handleInputChange}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                >
-                  <option value="umrah">Umrah Visa</option>
-                  <option value="hajj">Hajj Visa</option>
-                  <option value="tourist">Tourist Visa</option>
-                </select>
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Passport Number</label>
-                <input
-                  type="text"
-                  name="passportNumber"
-                  value={formData.passportNumber}
-                  onChange={handleInputChange}
-                  className="w-full px-3 py-2 border-b border-gray-300 focus:border-blue-500 focus:outline-none transition-colors"
-                  placeholder="Passport Number"
-                />
-              </div>
-              <div className="sm:col-span-2">
-                <label className="block text-sm font-medium text-gray-700 mb-2">Nationality</label>
-                <input
-                  type="text"
-                  name="nationality"
-                  value={formData.nationality}
-                  onChange={handleInputChange}
-                  className="w-full px-3 py-2 border-b border-gray-300 focus:border-blue-500 focus:outline-none transition-colors"
-                  placeholder="Nationality"
-                />
-              </div>
-            </div>
-          </div>
-        );
-
-      case 'transport':
-        return (
-          <div className="space-y-4">
-            <h3 className="text-lg font-semibold text-gray-900 mb-4">Transportation</h3>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Transport Type</label>
-                <select
-                  name="transportType"
-                  value={formData.transportType}
-                  onChange={handleInputChange}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                >
-                  <option value="bus">Bus</option>
-                  <option value="car">Private Car</option>
-                  <option value="van">Van</option>
-                  <option value="taxi">Taxi</option>
-                </select>
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Pickup Location</label>
-                <input
-                  type="text"
-                  name="pickupLocation"
-                  value={formData.pickupLocation}
-                  onChange={handleInputChange}
-                  className="w-full px-3 py-2 border-b border-gray-300 focus:border-blue-500 focus:outline-none transition-colors"
-                  placeholder="Pickup Location"
-                />
-              </div>
-            </div>
-          </div>
-        );
-
-      case 'costing':
-        return (
-          <div className="space-y-4">
-            <h3 className="text-lg font-semibold text-gray-900 mb-4">Costing</h3>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Package Price</label>
-                <input
-                  type="number"
-                  name="packagePrice"
-                  value={formData.packagePrice}
-                  onChange={handleInputChange}
-                  className="w-full px-3 py-2 border-b border-gray-300 focus:border-blue-500 focus:outline-none transition-colors"
-                  placeholder="Package Price"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Total Amount</label>
-                <input
-                  type="number"
-                  name="totalAmount"
-                  value={formData.totalAmount}
-                  onChange={handleInputChange}
-                  className={`w-full px-3 py-2 border-b focus:outline-none transition-colors ${
-                    errors.totalAmount ? 'border-red-500 focus:border-red-500' : 'border-gray-300 focus:border-blue-500'
-                  }`}
-                  placeholder="Total Amount"
-                />
-                {errors.totalAmount && <p className="text-red-500 text-xs mt-1">{errors.totalAmount}</p>}
-              </div>
-              <div className="sm:col-span-2">
-                <label className="block text-sm font-medium text-gray-700 mb-2">Additional Services</label>
-                <textarea
-                  name="additionalServices"
-                  value={formData.additionalServices}
-                  onChange={handleInputChange}
-                  rows={3}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                  placeholder="Additional Services"
-                />
-              </div>
-              <div className="sm:col-span-2">
-                <label className="block text-sm font-medium text-gray-700 mb-2">Payment Method</label>
-                <select
-                  name="paymentMethod"
-                  value={formData.paymentMethod}
-                  onChange={handleInputChange}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                >
-                  <option value="credit_card">Credit Card</option>
-                  <option value="bank_transfer">Bank Transfer</option>
-                  <option value="cash">Cash</option>
-                  <option value="installments">Installments</option>
-                </select>
-              </div>
-            </div>
-          </div>
-        );
-
-      default:
-        return null;
+    } catch (err: any) {
+      const msg =
+        err?.response?.data?.message ||
+        (typeof err?.response?.data === 'string' ? err.response.data : '') ||
+        err?.message ||
+        'Failed to create booking';
+      setServerError(msg);
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -594,27 +315,33 @@ const BookingModal: React.FC<BookingModalProps> = ({ isOpen, onClose, onSubmit }
         <div className="bg-blue-600 text-white p-4 sm:p-6">
           <div className="flex items-center justify-between">
             <h2 className="text-xl sm:text-2xl font-bold">Create New Booking</h2>
-            <button
-              onClick={onClose}
-              className="p-2 hover:bg-blue-700 rounded-lg transition-colors"
-            >
-              <X className="h-5 w-5" />
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={fillTestData}
+                className="hidden sm:inline px-3 py-2 bg-white/10 hover:bg-white/20 rounded-lg text-sm"
+              >
+                Fill Test Data
+              </button>
+              <button onClick={onClose} className="p-2 hover:bg-blue-700 rounded-lg transition-colors" aria-label="Close">
+                <X className="h-5 w-5" />
+              </button>
+            </div>
           </div>
-          
+
           {/* Step Navigation */}
           <div className="mt-4 sm:mt-6">
             <div className="flex flex-wrap gap-2">
-              {steps.map((step, index) => {
-                const Icon = step.icon;
+              {steps.map((s, index) => {
+                const Icon = s.icon;
                 const isActive = index === currentStep;
                 const isCompleted = index < currentStep;
-                
                 return (
                   <button
-                    key={step.id}
+                    key={s.id}
+                    type="button"
                     onClick={() => setCurrentStep(index)}
-                    className={`flex items-center space-x-1 sm:space-x-2 px-2 sm:px-3 py-1 sm:py-2 rounded-lg text-xs sm:text-sm font-medium transition-colors ${
+                    className={`flex items-center space-x-2 px-3 py-2 rounded-lg text-xs sm:text-sm font-medium transition-colors ${
                       isActive
                         ? 'bg-green-500 text-white'
                         : isCompleted
@@ -622,8 +349,8 @@ const BookingModal: React.FC<BookingModalProps> = ({ isOpen, onClose, onSubmit }
                         : 'bg-blue-500 text-blue-100 hover:bg-blue-400'
                     }`}
                   >
-                    <Icon className="h-3 w-3 sm:h-4 sm:w-4" />
-                    <span className="hidden sm:inline">{step.title}</span>
+                    <Icon className="h-4 w-4" />
+                    <span className="hidden sm:inline">{s.title}</span>
                   </button>
                 );
               })}
@@ -633,8 +360,367 @@ const BookingModal: React.FC<BookingModalProps> = ({ isOpen, onClose, onSubmit }
 
         {/* Content */}
         <div className="p-4 sm:p-6">
+          {serverError && (
+            <div className="mb-4 p-3 rounded bg-red-50 border border-red-200 text-red-700 text-sm">
+              {serverError}
+            </div>
+          )}
+
           <form onSubmit={handleSubmit}>
-            {renderStepContent()}
+            {/* CONTACT */}
+            {step.id === 'contact' && (
+              <div className="space-y-4">
+                <h3 className="text-lg font-semibold text-gray-900 mb-4">Contact Info</h3>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  {/* name */}
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Enter Name</label>
+                    <input
+                      data-testid="name"
+                      type="text" name="name" value={formData.name} onChange={handleInputChange}
+                      className={`w-full px-3 py-2 border-b focus:outline-none transition-colors ${
+                        errors.name ? 'border-red-500 focus:border-red-500' : 'border-gray-300 focus:border-blue-500'
+                      }`} placeholder="Enter Name"
+                    />
+                    {errors.name && <p className="text-red-500 text-xs mt-1">{errors.name}</p>}
+                  </div>
+                  {/* passengers */}
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Number of Passengers</label>
+                    <input
+                      data-testid="passengers"
+                      type="number" name="passengers" value={formData.passengers} onChange={handleInputChange}
+                      className={`w-full px-3 py-2 border-b focus:outline-none transition-colors ${
+                        errors.passengers ? 'border-red-500 focus:border-red-500' : 'border-gray-300 focus:border-blue-500'
+                      }`} placeholder="Enter Number of Passengers"
+                    />
+                    {errors.passengers && <p className="text-red-500 text-xs mt-1">{errors.passengers}</p>}
+                  </div>
+                  {/* adults */}
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Adults</label>
+                    <input data-testid="adults" type="number" name="adults" value={formData.adults} onChange={handleInputChange}
+                      className="w-full px-3 py-2 border-b border-gray-300 focus:border-blue-500 focus:outline-none transition-colors" placeholder="Adults" />
+                  </div>
+                  {/* children */}
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Children</label>
+                    <input data-testid="children" type="number" name="children" value={formData.children} onChange={handleInputChange}
+                      className="w-full px-3 py-2 border-b border-gray-300 focus:border-blue-500 focus:outline-none transition-colors" placeholder="Children" />
+                  </div>
+                  {/* email */}
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Email</label>
+                    <input
+                      data-testid="email"
+                      type="email" name="email" value={formData.email} onChange={handleInputChange}
+                      className={`w-full px-3 py-2 border-b focus:outline-none transition-colors ${
+                        errors.email ? 'border-red-500 focus:border-red-500' : 'border-gray-300 focus:border-blue-500'
+                      }`} placeholder="Enter Email"
+                    />
+                    {errors.email && <p className="text-red-500 text-xs mt-1">{errors.email}</p>}
+                  </div>
+                  {/* contact */}
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Contact Number</label>
+                    <input
+                      data-testid="contactNumber"
+                      type="tel" name="contactNumber" value={formData.contactNumber} onChange={handleInputChange}
+                      className={`w-full px-3 py-2 border-b focus:outline-none transition-colors ${
+                        errors.contactNumber ? 'border-red-500 focus:border-red-500' : 'border-gray-300 focus:border-blue-500'
+                      }`} placeholder="Enter Contact Number"
+                    />
+                    {errors.contactNumber && <p className="text-red-500 text-xs mt-1">{errors.contactNumber}</p>}
+                  </div>
+                </div>
+
+                {/* Agent (optional) */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Select Agent:</label>
+                  <select
+                    name="agent" value={formData.agent} onChange={handleInputChange}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  >
+                    <option value="">Use logged-in agent</option>
+                    <option value="ali">Ali Rahman</option>
+                    <option value="sara">Sara Khan</option>
+                    <option value="ahmed">Ahmed Malik</option>
+                  </select>
+                </div>
+              </div>
+            )}
+
+            {/* CREDIT */}
+            {step.id === 'credit' && (
+              <div className="space-y-4">
+                <h3 className="text-lg font-semibold text-gray-900 mb-4">Credit Card Information</h3>
+                <p className="text-xs text-gray-500">
+                  We only store <strong>payment method</strong> and <strong>last 4</strong>. Full card data is not sent to server.
+                </p>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div className="sm:col-span-2">
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Card Number</label>
+                    <input
+                      type="text" name="cardNumber" value={formData.cardNumber} onChange={handleInputChange}
+                      className="w-full px-3 py-2 border-b border-gray-300 focus:border-blue-500 focus:outline-none transition-colors" placeholder="1234 5678 9012 3456"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Expiry Date</label>
+                    <input type="text" name="expiryDate" value={formData.expiryDate} onChange={handleInputChange}
+                      className="w-full px-3 py-2 border-b border-gray-300 focus:border-blue-500 focus:outline-none transition-colors" placeholder="MM/YY" />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">CVV</label>
+                    <input type="password" name="cvv" value={formData.cvv} onChange={handleInputChange}
+                      className="w-full px-3 py-2 border-b border-gray-300 focus:border-blue-500 focus:outline-none transition-colors" placeholder="123" />
+                  </div>
+                  <div className="sm:col-span-2">
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Cardholder Name</label>
+                    <input
+                      data-testid="cardholderName"
+                      type="text" name="cardholderName" value={formData.cardholderName} onChange={handleInputChange}
+                      className={`w-full px-3 py-2 border-b focus:outline-none transition-colors ${
+                        errors.cardholderName ? 'border-red-500 focus:border-red-500' : 'border-gray-300 focus:border-blue-500'
+                      }`} placeholder="John Doe"
+                    />
+                    {errors.cardholderName && <p className="text-red-500 text-xs mt-1">{errors.cardholderName}</p>}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* FLIGHTS */}
+            {step.id === 'flights' && (
+              <div className="space-y-4">
+                <h3 className="text-lg font-semibold text-gray-900 mb-4">Flight Information</h3>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Departure City</label>
+                    <input
+                      data-testid="departureCity"
+                      type="text" name="departureCity" value={formData.departureCity} onChange={handleInputChange}
+                      className={`w-full px-3 py-2 border-b focus:outline-none transition-colors ${
+                        errors.departureCity ? 'border-red-500 focus:border-red-500' : 'border-gray-300 focus:border-blue-500'
+                      }`} placeholder="Departure City"
+                    />
+                    {errors.departureCity && <p className="text-red-500 text-xs mt-1">{errors.departureCity}</p>}
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Arrival City</label>
+                    <input
+                      data-testid="arrivalCity"
+                      type="text" name="arrivalCity" value={formData.arrivalCity} onChange={handleInputChange}
+                      className={`w-full px-3 py-2 border-b focus:outline-none transition-colors ${
+                        errors.arrivalCity ? 'border-red-500 focus:border-red-500' : 'border-gray-300 focus:border-blue-500'
+                      }`} placeholder="Arrival City"
+                    />
+                    {errors.arrivalCity && <p className="text-red-500 text-xs mt-1">{errors.arrivalCity}</p>}
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Departure Date</label>
+                    <input
+                      data-testid="departureDate"
+                      type="date" name="departureDate" value={formData.departureDate} onChange={handleInputChange}
+                      className={`w-full px-3 py-2 border-b focus:outline-none transition-colors ${
+                        errors.departureDate ? 'border-red-500 focus:border-red-500' : 'border-gray-300 focus:border-blue-500'
+                      }`}
+                    />
+                    {errors.departureDate && <p className="text-red-500 text-xs mt-1">{errors.departureDate}</p>}
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Return Date</label>
+                    <input
+                      data-testid="returnDate"
+                      type="date" name="returnDate" value={formData.returnDate} onChange={handleInputChange}
+                      className={`w-full px-3 py-2 border-b focus:outline-none transition-colors ${
+                        errors.returnDate ? 'border-red-500 focus:border-red-500' : 'border-gray-300 focus:border-blue-500'
+                      }`}
+                    />
+                    {errors.returnDate && <p className="text-red-500 text-xs mt-1">{errors.returnDate}</p>}
+                  </div>
+
+                  {/* NEW: Booking Date (backend "date") */}
+                  <div className="sm:col-span-2">
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Booking Date</label>
+                    <input
+                      data-testid="bookingDate"
+                      type="date" name="date" value={formData.date || ''} onChange={handleInputChange}
+                      className={`w-full px-3 py-2 border-b focus:outline-none transition-colors ${
+                        errors.date ? 'border-red-500 focus:border-red-500' : 'border-gray-300 focus:border-blue-500'
+                      }`}
+                    />
+                    {errors.date && <p className="text-red-500 text-xs mt-1">{errors.date}</p>}
+                  </div>
+
+                  <div className="sm:col-span-2">
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Flight Class</label>
+                    <select
+                      name="flightClass" value={formData.flightClass} onChange={handleInputChange}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    >
+                      <option value="economy">Economy</option>
+                      <option value="business">Business</option>
+                      <option value="first">First Class</option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* HOTELS */}
+            {step.id === 'hotels' && (
+              <div className="space-y-4">
+                <h3 className="text-lg font-semibold text-gray-900 mb-4">Hotel Information</h3>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Hotel Name</label>
+                    <input type="text" name="hotelName" value={formData.hotelName} onChange={handleInputChange}
+                      className="w-full px-3 py-2 border-b border-gray-300 focus:border-blue-500 focus:outline-none transition-colors" placeholder="Hotel Name" />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Room Type</label>
+                    <select
+                      name="roomType" value={formData.roomType} onChange={handleInputChange}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    >
+                      <option value="">Select Room Type</option>
+                      <option value="single">Single Room</option>
+                      <option value="double">Double Room</option>
+                      <option value="triple">Triple Room</option>
+                      <option value="quad">Quad Room</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Check-in Date</label>
+                    <input type="date" name="checkIn" value={formData.checkIn} onChange={handleInputChange}
+                      className="w-full px-3 py-2 border-b border-gray-300 focus:border-blue-500 focus:outline-none transition-colors" />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Check-out Date</label>
+                    <input type="date" name="checkOut" value={formData.checkOut} onChange={handleInputChange}
+                      className="w-full px-3 py-2 border-b border-gray-300 focus:border-blue-500 focus:outline-none transition-colors" />
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* VISA */}
+            {step.id === 'visa' && (
+              <div className="space-y-4">
+                <h3 className="text-lg font-semibold text-gray-900 mb-4">Visa Information</h3>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Visa Type</label>
+                    <select
+                      name="visaType" value={formData.visaType} onChange={handleInputChange}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    >
+                      <option value="umrah">Umrah Visa</option>
+                      <option value="hajj">Hajj Visa</option>
+                      <option value="tourist">Tourist Visa</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Passport Number</label>
+                    <input type="text" name="passportNumber" value={formData.passportNumber} onChange={handleInputChange}
+                      className="w-full px-3 py-2 border-b border-gray-300 focus:border-blue-500 focus:outline-none transition-colors" placeholder="Passport Number" />
+                  </div>
+                  <div className="sm:col-span-2">
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Nationality</label>
+                    <input type="text" name="nationality" value={formData.nationality} onChange={handleInputChange}
+                      className="w-full px-3 py-2 border-b border-gray-300 focus:border-blue-500 focus:outline-none transition-colors" placeholder="Nationality" />
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* TRANSPORT */}
+            {step.id === 'transport' && (
+              <div className="space-y-4">
+                <h3 className="text-lg font-semibold text-gray-900 mb-4">Transportation</h3>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Transport Type</label>
+                    <select
+                      name="transportType" value={formData.transportType} onChange={handleInputChange}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    >
+                      <option value="bus">Bus</option>
+                      <option value="car">Private Car</option>
+                      <option value="van">Van</option>
+                      <option value="taxi">Taxi</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Pickup Location</label>
+                    <input
+                      type="text" name="pickupLocation" value={formData.pickupLocation} onChange={handleInputChange}
+                      className="w-full px-3 py-2 border-b border-gray-300 focus:border-blue-500 focus:outline-none transition-colors" placeholder="Pickup Location"
+                    />
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* COSTING */}
+            {step.id === 'costing' && (
+              <div className="space-y-4">
+                <h3 className="text-lg font-semibold text-gray-900 mb-4">Costing</h3>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  {/* NEW: Package field */}
+                  <div className="sm:col-span-2">
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Package</label>
+                    <input
+                      data-testid="package"
+                      type="text" name="package" value={formData.package || ''} onChange={handleInputChange}
+                      className={`w-full px-3 py-2 border-b focus:outline-none transition-colors ${
+                        errors.package ? 'border-red-500 focus:border-red-500' : 'border-gray-300 focus:border-blue-500'
+                      }`} placeholder="e.g. 7N Umrah Standard"
+                    />
+                    {errors.package && <p className="text-red-500 text-xs mt-1">{errors.package}</p>}
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Package Price</label>
+                    <input
+                      type="number" name="packagePrice" value={formData.packagePrice} onChange={handleInputChange}
+                      className="w-full px-3 py-2 border-b border-gray-300 focus:border-blue-500 focus:outline-none transition-colors" placeholder="Package Price"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Total Amount</label>
+                    <input
+                      data-testid="totalAmount"
+                      type="number" name="totalAmount" value={formData.totalAmount} onChange={handleInputChange}
+                      className={`w-full px-3 py-2 border-b focus:outline-none transition-colors ${
+                        errors.totalAmount ? 'border-red-500 focus:border-red-500' : 'border-gray-300 focus:border-blue-500'
+                      }`} placeholder="Total Amount"
+                    />
+                    {errors.totalAmount && <p className="text-red-500 text-xs mt-1">{errors.totalAmount}</p>}
+                  </div>
+                  <div className="sm:col-span-2">
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Additional Services</label>
+                    <textarea
+                      name="additionalServices" value={formData.additionalServices} onChange={handleInputChange} rows={3}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent" placeholder="Additional Services"
+                    />
+                  </div>
+                  <div className="sm:col-span-2">
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Payment Method</label>
+                    <select
+                      name="paymentMethod" value={formData.paymentMethod} onChange={handleInputChange}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    >
+                      <option value="credit_card">Credit Card</option>
+                      <option value="bank_transfer">Bank Transfer</option>
+                      <option value="cash">Cash</option>
+                      <option value="installments">Installments</option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+            )}
           </form>
         </div>
 
@@ -643,33 +729,36 @@ const BookingModal: React.FC<BookingModalProps> = ({ isOpen, onClose, onSubmit }
           <button
             type="button"
             onClick={handlePrevious}
-            disabled={currentStep === 0}
+            disabled={currentStep === 0 || submitting}
             className="px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
           >
             Previous
           </button>
-          
+
           <div className="flex space-x-3">
             <button
               type="button"
               onClick={onClose}
+              disabled={submitting}
               className="px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 transition-colors"
             >
               Cancel
             </button>
-            
+
             {currentStep === steps.length - 1 ? (
               <button
                 type="button"
-                onClick={handleSubmit}
-                className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+                onClick={() => handleSubmit()}
+                disabled={submitting}
+                className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-60"
               >
-                Create Booking
+                {submitting ? 'Creating…' : 'Create Booking'}
               </button>
             ) : (
               <button
                 type="button"
                 onClick={handleNext}
+                disabled={submitting}
                 className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
               >
                 Next
