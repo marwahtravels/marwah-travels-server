@@ -38,7 +38,8 @@ app.use(limiter);
 app.use(express.json());
 const allowedOrigins = [
   "http://localhost:5173", // local dev
-  "https://marwah-travels-server-fvbqrdecy-marwah.vercel.app", // vercel prod
+  "https://marwah-travels-server.vercel.app", // ✅ production frontend
+  "https://marwah-travels-server-fvbqrdecy-marwah.vercel.app", // optional: preview deployments
 ];
 
 app.use(
