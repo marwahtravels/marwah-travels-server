@@ -90,9 +90,6 @@ app.use("/api/bookings", bookingRoutes);
 app.use('/api/inquiries', inquiryRoutes);
 app.use('/api/agent', agentRoutes);
 app.use("/api/analytics", analyticsRoutes);
-// app.use("/api/pdf", pdfRoutes);
-// export default app;
-// server.js (routes mount ho jane ke BAAD ye lines add karein)
 
 
 
