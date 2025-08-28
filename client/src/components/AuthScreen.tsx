@@ -172,34 +172,7 @@ const AuthScreen: React.FC = () => {
               <LogIn className="h-5 w-5" />
               <span>{loading ? 'Signing In…' : 'Sign In'}</span>
             </button>
-
-            {/* quick demo autofill buttons (optional) */}
-            <div className="grid grid-cols-2 gap-2">
-              <button
-                type="button"
-                onClick={() => autofillDemo('admin')}
-                className="text-xs py-2 rounded border border-gray-300 hover:bg-gray-50"
-              >
-                Fill Admin Demo
-              </button>
-              <button
-                type="button"
-                onClick={() => autofillDemo('agent')}
-                className="text-xs py-2 rounded border border-gray-300 hover:bg-gray-50"
-              >
-                Fill Agent Demo
-              </button>
-            </div>
           </form>
-        </div>
-
-        {/* Demo Credentials */}
-        <div className="mt-6 p-4 bg-blue-50 rounded-lg border border-blue-200">
-          <p className="text-sm text-blue-800 font-medium mb-2">Demo Credentials:</p>
-          <div className="space-y-1">
-            <p className="text-xs text-blue-700"><strong>Admin:</strong> admin@example.com / password123</p>
-            <p className="text-xs text-blue-700"><strong>Agent:</strong> ali@example.com / password123</p>
-          </div>
         </div>
       </div>
     </div>
