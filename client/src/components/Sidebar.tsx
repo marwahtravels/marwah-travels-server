@@ -33,7 +33,7 @@ const Sidebar: React.FC<SidebarProps> = ({
     { id: 'bookings', label: 'Bookings', icon: Calendar },
     { id: 'inquiries', label: 'Inquiries', icon: MessageSquare },
     { id: 'sale-agents', label: 'Sale Agents', icon: Users },
-    { id: 'admin-panel', label: 'Admin Panel', icon: Shield },
+    // { id: 'admin-panel', label: 'Admin Panel', icon: Shield },
   ];
 
   const agentMenuItems = [
