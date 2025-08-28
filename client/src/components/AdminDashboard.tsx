@@ -147,13 +147,6 @@ const AdminDashboard: React.FC = () => {
           <h1 className="text-2xl font-bold text-gray-900 mb-2">Admin Dashboard</h1>
           <p className="text-gray-600">Welcome back, {user?.name}</p>
         </div>
-        <div className="mt-4 sm:mt-0">
-          <select className="px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent">
-            <option>This Year</option>
-            <option>This Month</option>
-            <option>This Week</option>
-          </select>
-        </div>
       </div>
 
       {/* Stats Grid */}
@@ -178,30 +171,6 @@ const AdminDashboard: React.FC = () => {
               No booking data available
             </div>
           )}
-        </div>
-
-        {/* Monthly Trends */}
-        <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4 sm:p-6">
-          <h3 className="text-lg font-semibold text-gray-900 mb-4">Monthly Trends</h3>
-          <div className="space-y-4">
-            {monthlyTrends.map((trend, index) => (
-              <div key={index} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
-                <div className="flex items-center space-x-3">
-                  <div className="w-8 h-8 bg-blue-100 rounded-lg flex items-center justify-center">
-                    <BarChart3 className="h-4 w-4 text-blue-600" />
-                  </div>
-                  <div>
-                    <p className="font-medium text-gray-900">{trend.month}</p>
-                    <p className="text-sm text-gray-500">{trend.bookings} bookings</p>
-                  </div>
-                </div>
-                <div className="text-right">
-                  <p className="font-semibold text-gray-900">${trend.revenue.toLocaleString()}</p>
-                  <p className="text-sm text-gray-500">Revenue</p>
-                </div>
-              </div>
-            ))}
-          </div>
         </div>
       </div>
 
