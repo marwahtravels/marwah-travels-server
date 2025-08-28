@@ -157,7 +157,7 @@ const AdminDashboard: React.FC = () => {
       </div>
 
       {/* Charts and Analytics */}
-      <div className="grid grid-cols-1 xl:grid-cols-2 gap-6 lg:gap-8">
+      <div className="grid grid-cols-1 gap-6 lg:gap-8">
         {/* Agent Performance Chart */}
         <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4 sm:p-6">
           <h3 className="text-lg font-semibold text-gray-900 mb-4">
